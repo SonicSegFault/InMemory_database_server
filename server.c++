@@ -1,17 +1,18 @@
 #include "server.hpp"
+#include "parser.hpp"
 
 #include <iostream> 
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <string.h>
 
-db::TCPServer::TCPServer(int port_): server_fd_(-1) {}
+db::TCPServer::TCPServer(int port_): server_fd_(-1), port_(port_) {}
 db::TCPServer::~TCPServer() {
-    if(server_fd_ == -1) { close(server_fd_); }
+    if(server_fd_ >= 0) { close(server_fd_); }
 }
 
 void db::TCPServer::setup_socket() {
-    if ((server_fd_ == socket(AF_INET, SOCK_STREAM, 0)) < 0) { perror("socket failed"); exit(EXIT_FAILURE); }
+    if ((server_fd_ = socket(AF_INET, SOCK_STREAM, 0)) < 0) { perror("socket failed"); exit(EXIT_FAILURE); }
     
     int opt = 1; 
     setsockopt(server_fd_, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
@@ -58,8 +59,12 @@ void db::TCPServer::handle_request(int client_fd){
         if(received_size > 0){
             request.append(buffer + i, received_size);
 
+            if(Request entry = parse_request(request); entry.status == PARSE_OK){
+                request.clear(); //still buggy when partial inputs come but works for now
+                //save in db later
+            }
             // Example response, temp
-            std::string response = "OK\n";
+            std::string response = "OK\n" + request;
             if (send(client_fd, response.c_str(), response.size(), 0) < 0) { perror("send failed"); break; }
         } else if(received_size == 0){
             std::cout << "Client disconnected." << std::endl; break;
@@ -70,4 +75,3 @@ void db::TCPServer::handle_request(int client_fd){
         if (i + received_size >= buffsize) { i = 0; }
     }
 }
-
