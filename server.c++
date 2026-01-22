@@ -5,15 +5,19 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <string.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <sys/epoll.h>
 
-db::TCPServer::TCPServer(int port_): server_fd_(-1), port_(port_) {}
+db::TCPServer::TCPServer(int port_): port_(port_), server_fd_(-1), epoll_fd_(-1) {}
 db::TCPServer::~TCPServer() {
     if(server_fd_ >= 0) { close(server_fd_); }
 }
 
 void db::TCPServer::setup_socket() {
     if ((server_fd_ = socket(AF_INET, SOCK_STREAM, 0)) < 0) { perror("socket failed"); exit(EXIT_FAILURE); }
-    
+    fcntl(server_fd_, F_SETFL, O_NONBLOCK);
+
     int opt = 1; 
     setsockopt(server_fd_, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 
@@ -29,6 +33,16 @@ void db::TCPServer::setup_socket() {
     if (listen(server_fd_, 5) < 0) { perror("listen failed"); exit(EXIT_FAILURE); }
 
     std::cout << "Server listening on port " << port_ << std::endl;
+
+    epoll_fd_ = epoll_create1(0);
+    if (epoll_fd_ == -1) { perror("epoll_create1 failed"); exit(EXIT_FAILURE); }
+
+    epoll_event event{};
+    event.events = EPOLLIN;
+    event.data.fd = server_fd_;
+    if (epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, server_fd_, &event) == -1) {
+        perror("epoll_ctl failed"); exit(EXIT_FAILURE);
+    }
 }
 
 void db::TCPServer::start_server(){
@@ -59,8 +73,10 @@ void db::TCPServer::handle_request(int client_fd){
         if(received_size > 0){
             request.append(buffer + i, received_size);
 
-            if(Request entry = parse_request(request); entry.status == PARSE_OK){
-                request.clear(); //still buggy when partial inputs come but works for now
+            while(true){
+                Request entry = parse_request(request);
+                if(entry.status == PARSE_OK) request.erase(0, entry.offset); 
+                else break;
                 //save in db later
             }
             // Example response, temp

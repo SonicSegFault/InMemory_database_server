@@ -2,33 +2,52 @@
 
 #include <sstream>
 
-Request parse_request(const std::string& request){
-    std::istringstream iss(request); 
-    char type; iss >> type;
-    
-    if (type != '*') { throw std::runtime_error("Invalid RESP: expected array"); }
+Request parse_request(std::string& request) {
+    std::istringstream iss(request);
+    size_t current_pos = 0;
 
-    int numElems; iss >> numElems; iss.ignore(2); // skip \r\n
+    // Parse array header 
+    std::string arrayline;
+    if (!std::getline(iss, arrayline, '\n')) {
+        return {PARSE_INCOMPLETE}; // not enough data yet
+    }
+    current_pos += arrayline.size() + 1; // +1 for '\n'
+    if (!arrayline.empty() && arrayline.back() == '\r') arrayline.pop_back();
+
+    if (arrayline.empty() || arrayline[0] != '*')
+        perror("Invalid RESP: expected array");
+
+    int numElems = std::stoi(arrayline.substr(1));
 
     Request entry;
-    entry.status = PARSE_INCOMPLETE; 
-    for(int i{}; i < numElems; i++){
-        iss >> type;
-        if(type != '$') { throw std::runtime_error("Invalid RESP: expected bulk string"); }
+    entry.status = PARSE_INCOMPLETE;
 
-        int len; iss >> len; iss.ignore(2);
+    // Parse each bulk string
+    for (int i = 0; i < numElems; i++) {
+        std::string line;
+        if (!std::getline(iss, line, '\n')) return entry; // incomplete
+        current_pos += line.size() + 1; 
+        if (!line.empty() && line.back() == '\r') line.pop_back();
 
-        std::size_t curr_idx = static_cast<size_t>(iss.tellg());
-        if (request.size() <  curr_idx + len + 2) { return entry; }
-        
+        if (line.empty() || line[0] != '$') perror("Invalid RESP: expected bulk string");
+
+        int len = std::stoi(line.substr(1));
+
         std::string arg(len, '\0');
-        iss.read(&arg[0], len);
-        iss.ignore(2);
+        if (!iss.read(&arg[0], len)) return entry; // incomplete bulk string
+        current_pos += len;
 
-        if(i == 0) { entry.name = arg; }
-        else { entry.args.push_back(arg); }
+        // Consume trailing CRLF
+        char cr, lf;
+        if (!iss.get(cr) || !iss.get(lf)) return entry; // incomplete
+        current_pos += 2;
+        if (cr != '\r' || lf != '\n') perror("Invalid RESP: expected CRLF after bulk string");
+
+        if (i == 0) entry.name = arg;
+        else entry.args.push_back(arg);
     }
 
+    entry.offset = current_pos;
     entry.status = PARSE_OK;
     return entry;
 }
