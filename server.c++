@@ -37,10 +37,10 @@ void db::TCPServer::setup_socket() {
     epoll_fd_ = epoll_create1(0);
     if (epoll_fd_ == -1) { perror("epoll_create1 failed"); exit(EXIT_FAILURE); }
 
-    epoll_event event{};
-    event.events = EPOLLIN;
-    event.data.fd = server_fd_;
-    if (epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, server_fd_, &event) == -1) {
+    epoll_event server_event{};
+    server_event.events = EPOLLIN;
+    server_event.data.fd = server_fd_;
+    if (epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, server_fd_, &server_event) == -1) {
         perror("epoll_ctl failed"); exit(EXIT_FAILURE);
     }
 }
@@ -48,16 +48,40 @@ void db::TCPServer::setup_socket() {
 void db::TCPServer::start_server(){
     setup_socket();
 
+    const int MAX_EVENTS = 64; epoll_event events[MAX_EVENTS];
+
     while (true) { 
-        sockaddr_in client_addr{};
-        socklen_t client_len = sizeof(client_addr);
-        
-        int client_fd = accept(server_fd_, (struct sockaddr*)&client_addr, &client_len); 
-        if (client_fd < 0) { perror("accept failed"); continue; }
-
-        handle_request(client_fd);
-
-        close(client_fd);
+        int n = epoll_wait(epoll_fd_, events, MAX_EVENTS, -1);
+        if (n == -1) { 
+            if(errno == EINTR) continue;
+            perror("epoll_wait failed"); 
+            break;
+        }
+        for(int i = 0; i < n; i++) {
+            int fd = events[i].data.fd;
+            if (fd == server_fd_) {
+                while(true){
+                    sockaddr_in client_address{};
+                    socklen_t client_len = sizeof(client_address);
+                    int client_fd{};
+                    if((client_fd = accept(server_fd_, (struct sockaddr*)&client_address, &client_len)) < 0){
+                        if(errno == EAGAIN || errno == EWOULDBLOCK) break; 
+                        else { perror("accept failed"); break; }
+                    }
+                    fcntl(client_fd, F_SETFL, O_NONBLOCK);
+                    
+                    epoll_event client_event{};
+                    client_event.events = EPOLLIN | EPOLLET;
+                    client_event.data.fd = client_fd;
+                    if (epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, client_fd, &client_event) == -1) {
+                        perror("epoll_ctl failed"); exit(EXIT_FAILURE); close(client_fd);
+                    }
+                    std::cout << "Accepted new connection, fd: " << client_fd << std::endl;
+                }
+            } else {
+                handle_request(fd);
+            }
+        }
     }
 }
 
