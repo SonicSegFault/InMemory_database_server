@@ -86,32 +86,33 @@ void db::TCPServer::start_server(){
 }
 
 void db::TCPServer::handle_request(int client_fd){
-    char buffer[1024]; 
-    size_t buffsize = sizeof(buffer);
-    std::string request;
-
-    ssize_t received_size{};
-    for (size_t i = 0; ; i += received_size) {
-        received_size = recv(client_fd, buffer + i, buffsize - i, 0);
-
+    char buffer[1024];
+    
+    while(true){
+        ssize_t received_size = recv(client_fd, buffer, sizeof(buffer), 0);
         if(received_size > 0){
-            request.append(buffer + i, received_size);
+            client_buffer[client_fd].append(buffer, received_size);
 
             while(true){
-                Request entry = parse_request(request);
-                if(entry.status == PARSE_OK) request.erase(0, entry.offset); 
+                Request entry = parse_request(client_buffer[client_fd]);
+                if(entry.status == PARSE_OK) client_buffer[client_fd].erase(0, entry.offset); 
                 else break;
                 //save in db later
             }
             // Example response, temp
-            std::string response = "OK\n" + request;
+            std::string response = "OK\n";
             if (send(client_fd, response.c_str(), response.size(), 0) < 0) { perror("send failed"); break; }
         } else if(received_size == 0){
-            std::cout << "Client disconnected." << std::endl; break;
+            std::cout << "Client disconnected, fd: " << client_fd << std::endl; 
+            close(client_fd); 
+            client_buffer.erase(client_fd);
+            break; 
         } else {
-            std::cerr << "recv failed: " << strerror(errno) << std::endl; break;
+            if(errno == EAGAIN || errno == EWOULDBLOCK) break; 
+            std::cerr << "recv failed: " << strerror(errno) << std::endl; 
+            close(client_fd); 
+            client_buffer.erase(client_fd);
+            break; 
         }
-
-        if (i + received_size >= buffsize) { i = 0; }
     }
 }
