@@ -13,6 +13,8 @@ namespace db{
             int server_fd_;
             int epoll_fd_;
 
+            // KVStore kv_store_;
+
             std::unordered_map<int, std::string> client_buffer;
 
             void setup_socket();

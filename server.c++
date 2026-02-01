@@ -95,13 +95,17 @@ void db::TCPServer::handle_request(int client_fd){
 
             while(true){
                 Request entry = parse_request(client_buffer[client_fd]);
-                if(entry.status == PARSE_OK) client_buffer[client_fd].erase(0, entry.offset); 
-                else break;
-                //save in db later
+                if(entry.status == PARSE_OK) {
+                    client_buffer[client_fd].erase(0, entry.offset); 
+
+                    std::string response;
+                    
+                    //save in db later with proper database class usage
+                    
+                } else break;
+                
             }
-            // Example response, temp
-            std::string response = "OK\n";
-            if (send(client_fd, response.c_str(), response.size(), 0) < 0) { perror("send failed"); break; }
+            
         } else if(received_size == 0){
             std::cout << "Client disconnected, fd: " << client_fd << std::endl; 
             close(client_fd); 
